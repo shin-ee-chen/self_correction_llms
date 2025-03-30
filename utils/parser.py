@@ -1,6 +1,7 @@
 from typing import Any, Dict
 from math_verify import parse, StringExtractionConfig, LatexExtractionConfig
-
+import sympy
+import importlib
 
 def parse_question(example, data_name):
     question = ""
@@ -49,3 +50,30 @@ def extract_pred_and_parse(completion, data_name):
     else:
         pred = []
     return pred
+
+
+def serialize_list_of_lists(data):
+    serialized = []
+    for sublist in data:
+        serialized.append([
+            {
+                "type": "native",
+                "value": item
+            } if isinstance(item, (int, float, str, bool, type(None))) else
+            {
+                "type": f"{type(item).__module__}.{type(item).__name__}",
+                "value": str(item)
+            }
+            for item in sublist
+        ])
+    return {"data": serialized}
+
+def deserialize_list_of_lists(serialized_dict):
+    deserialized = []
+    for sublist in serialized_dict["data"]:
+        deserialized.append([
+            item["value"] if item["type"] == "native" else
+            getattr(importlib.import_module(item["type"].rsplit(".", 1)[0]), item["type"].split(".")[-1])(item["value"])
+            for item in sublist
+        ])
+    return deserialized

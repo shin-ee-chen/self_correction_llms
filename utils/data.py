@@ -56,10 +56,6 @@ def load_jsonl(file: Union[str, Path]) -> Iterable[Any]:
 
 
 def save_jsonl(samples, save_path):
-    # ensure path
-    folder = os.path.dirname(save_path)
-    os.makedirs(folder, exist_ok=True)
-
     with open(save_path, "w", encoding="utf-8") as f:
         for sample in samples:
             f.write(json.dumps(sample, ensure_ascii=False) + "\n")
@@ -68,6 +64,18 @@ def save_jsonl(samples, save_path):
 
 def load_data(data_name, split, data_dir="./data"):
     data_file = f"{data_dir}/{data_name}/{split}.jsonl"
+    assert os.path.exists(data_file)
+    examples = list(load_jsonl(data_file))
+
+    # add 'idx' in the first column
+    if "idx" not in examples[0]:
+        examples = [{"idx": i, **example} for i, example in enumerate(examples)]
+
+    # dedepulicate & sort
+    examples = sorted(examples, key=lambda x: x["idx"])
+    return examples
+
+def load_generated_data(data_file):
     assert os.path.exists(data_file)
     examples = list(load_jsonl(data_file))
 
