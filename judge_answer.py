@@ -7,7 +7,7 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from utils.data import load_generated_data, save_jsonl
-from utils.parser import deserialize_list_of_lists
+from utils.parser import deserialize_list_of_lists, extract_pred_and_parse
 from utils.eval import per_sample_verification
 
 
@@ -94,26 +94,39 @@ def main(data_name, data_path, args):
                 "question": example["question"],
                 "gt": example['gt'],
                 "prompt": example['prompt'],
-                "first_reasoning": example['first_reasoning'],
-                "predictions": example['predictions']
+                "first_reasonings": example['first_reasonings'],
+                "answer": example['answer']
             }
             samples.append(sample)
 
 
-        
-        for i in range(len(samples)):
-            print(samples[i]['predictions'])
-            print(type(samples[i]['predictions']))
-            print("Ground truth", samples[i]['gt'])
-            pred = deserialize_list_of_lists(samples[i]['predictions'])
-            per_sample_performance = per_sample_verification(pred, samples[i]['gt'])
-            print(per_sample_performance)
-            print( sum(per_sample_performance) / len(per_sample_performance))
-            samples[i].update({'predictions_label': per_sample_performance, 
-            'performance': sum(per_sample_performance) / len(per_sample_performance)})
+        n_first_reasoning_sampling = len(samples[0]['first_reasonings'])
+        n_answers_sampling = len(samples[0]['answer'][0])
 
+        updated_samples = []
+        for i, sample in enumerate(samples):
+            
+            scores = []
+            preds = []
+            for j in range(n_first_reasoning_sampling):
+                first_reasoning_scores = []
+                first_reasoning_preds = []
+                for k in range(n_answers_sampling):
+                    result = extract_pred_and_parse(sample['answer'][j][k], data_name)
+                    performance = per_sample_verification(result, sample['gt'])
 
-        # results = {key: [d[key] for d in samples] for key in samples[0]}
+                    result = [str(r) for r in result] 
+                    first_reasoning_preds.append(result)
+                    first_reasoning_scores.append(performance)
+                scores.append(first_reasoning_scores)
+                preds.append(first_reasoning_preds)
+
+            sample.update({
+                "score": scores,
+                "final_answer": preds
+            })
+
+            updated_samples.append(sample)
 
         try:
             save_jsonl(samples, generated_dataset_file)

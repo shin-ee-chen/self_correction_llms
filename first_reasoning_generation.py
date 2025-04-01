@@ -7,10 +7,8 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from vllm import LLM, SamplingParams
-import pandas as pd
 from utils.data import load_data, construct_prompt, save_jsonl
-from utils.parser import parse_question, parse_ground_truth, extract_pred_and_parse
-from utils.eval import obtain_3d_sub_scores_and_preds, obtain_3d_scores, per_sample_verification
+from utils.parser import parse_question, parse_ground_truth
 
 
 def parse_args():
@@ -166,8 +164,8 @@ def main(llm, tokenizer, data_name, args):
 
     # creating prompts
     prompts = [sample["prompt"] for sample in samples for _ in range(args.n_sampling)]
-    questions = [sample["question"] for sample in samples for _ in range(args.n_sampling)]
-    gt = [sample["gt"] for sample in samples for _ in range(args.n_sampling)]
+    # questions = [sample["question"] for sample in samples for _ in range(args.n_sampling)]
+    # gt = [sample["gt"] for sample in samples for _ in range(args.n_sampling)]
 
     
 
@@ -191,22 +189,16 @@ def main(llm, tokenizer, data_name, args):
 
     assert len(generated_reasonings) == len(prompts)
 
-    
-    data = {
-        'question': questions,
-        'gt': gt,
-        'prompt':prompts,
-        'first_reasoning': generated_reasonings,
-        'dataset_name': [data_name] * len(questions)
-
-    }
+    updated_samples = []
+    for i, sample in enumerate(samples):
+        sample.update({
+                "first_reasonings": generated_reasonings[i * args.n_sampling : (i + 1) * args.n_sampling],
+             })
+        updated_samples.append(sample)
 
 
     try:
-        
-        with open(generated_dataset_file, 'w') as f:
-            json.dump(data, f)
-        print(f"Saved generated reasoings to {generated_dataset_file}")
+        save_jsonl(updated_samples, generated_dataset_file)
     except Exception as e:
         print(f"Error saving generated reasoning: {e}")
 

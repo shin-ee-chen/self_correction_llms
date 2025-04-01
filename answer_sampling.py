@@ -8,7 +8,7 @@ from tqdm import tqdm
 import torch
 from vllm import LLM, SamplingParams
 import pandas as pd
-from utils.data import save_jsonl
+from utils.data import save_jsonl, load_generated_data
 from utils.parser import extract_pred_and_parse, serialize_list_of_lists
 from utils.eval import per_sample_verification
 
@@ -59,11 +59,7 @@ def set_seed(seed: int = 42) -> None:
 
 def prepare_data(data_path, data_name, args):
     
-
-    with open(data_path, 'r') as f:
-            examples = json.load(f)
-
-    examples = [dict(zip(examples, values)) for values in zip(*examples.values())]
+    examples = load_generated_data(data_path)
     # sample `num_test_sample` from dataset for debug purpose
     if args.num_test_sample > 0:
         examples = examples[: args.num_test_sample]
@@ -125,21 +121,31 @@ def main(llm, tokenizer, data_name, data_path, args):
             print(examples[0])
 
         samples = []
-
+        
         for i, example in tqdm(enumerate(examples), total=len(examples)):
             
-            first_reasoning = example['first_reasoning']
+
 
             sample = {
                 "question": example["question"],
                 "gt": example['gt'],
-                "prompt": example['prompt'] + first_reasoning,
-                'first_reasoning': first_reasoning
+                "prompt": example['prompt'],
+                'first_reasonings': example['first_reasonings']
             }
 
             samples.append(sample)
 
-        prompts = [sample["prompt"] for sample in samples for _ in range(args.n_sampling)]
+
+        n_first_reasoning_sampling = len(samples[0]['first_reasonings'])
+
+        prompts = []
+        for i, sample in enumerate(samples):
+            for j in range(n_first_reasoning_sampling):
+                for _ in range(args.n_sampling):
+                    prompts.append(sample['prompt']+ sample['first_reasonings'][j])
+        # prompts = [sample["prompt"] for sample in samples for _ in range(args.n_sampling)]
+
+        assert len(prompts) == len(samples) * n_first_reasoning_sampling * args.n_sampling
 
         for i, p in enumerate(prompts):
             if "</think>" not in p:
@@ -165,21 +171,21 @@ def main(llm, tokenizer, data_name, data_path, args):
 
         assert len(generated_reasonings) == len(prompts)
 
-        preds = []
-        for i in range(len(generated_reasonings)):
-            preds.append(extract_pred_and_parse(generated_reasonings[i], data_name))
-
+        ### shape: n_first_reasoning_sampling * args.n_sampling
+        answers = []
+        for i, sample in enumerate(samples):
+            tmp_answers = generated_reasonings[i * n_first_reasoning_sampling * args.n_sampling : (i + 1) * n_first_reasoning_sampling * args.n_sampling]
+            assert len(tmp_answers) == n_first_reasoning_sampling * args.n_sampling
+            answers.append([tmp_answers[i * args.n_sampling:(i + 1) * args.n_sampling] for i in range(n_first_reasoning_sampling)])
 
         updated_samples = []
+        
+        
+        
         for i, sample in enumerate(samples):
             sample.update({
-                "predictions": serialize_list_of_lists(preds[i * args.n_sampling : (i + 1) * args.n_sampling]),
-                "sampled_output": generated_reasonings[i * args.n_sampling : (i + 1) * args.n_sampling]
+                "answer": answers[i],
              })
-            per_sample_performance = per_sample_verification(preds[i * args.n_sampling : (i + 1) * args.n_sampling], sample['gt'])
-            sample.update({'predictions_label': per_sample_performance, 
-            'performance': sum(per_sample_performance) / len(per_sample_performance)})
-
             updated_samples.append(sample)
 
 
