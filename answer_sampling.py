@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import argparse
 import numpy as np
@@ -7,7 +8,7 @@ from tqdm import tqdm
 import torch
 from vllm import LLM, SamplingParams
 
-from utils.data import save_jsonl, load_generated_data
+from utils.data import load_generated_data
 
 
 def parse_args():
@@ -140,7 +141,9 @@ def main(llm, tokenizer, data_name, data_path, args):
         sample.update({"answer": answers[i]})
         updated_samples.append(sample)
 
-    save_jsonl(updated_samples, generated_dataset_file)
+    #save_jsonl(updated_samples, generated_dataset_file)
+    print(f"Save to {generated_dataset_file}")
+    json.dump(updated_samples, open(generated_dataset_file, "w",), indent=2)
 
 
 if __name__ == "__main__":
