@@ -1,20 +1,16 @@
 import os
-import time
-import json
 import random
 import argparse
 import numpy as np
 from tqdm import tqdm
+
 import torch
 from vllm import LLM, SamplingParams
-import pandas as pd
+
 from utils.data import save_jsonl, load_generated_data
-from utils.parser import extract_pred_and_parse, serialize_list_of_lists
-from utils.eval import per_sample_verification
 
 
 def parse_args():
-    
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_names", default="gsm8k,math", type=str)
     parser.add_argument("--dataset_dir", default="", type=str)
@@ -31,14 +27,9 @@ def parse_args():
     parser.add_argument("--max_tokens_per_call", default=2048, type=int)
     parser.add_argument("--pipeline_parallel_size", type=int, default=1)
     parser.add_argument("--max_num_seqs", type=int, default=32)
-    parser.add_argument('--enable_prefix_caching', action='store_true', default=False)
-    parser.add_argument('--disable_chunked_prefill', action='store_true', default=False)
     parser.add_argument('--max_model_len', type=int, default=64000)
     parser.add_argument("--n_sampling", default=1, type=int, help="I.e. n")
-
-
     args = parser.parse_args()
-
     # top_p must be 1 when using greedy sampling (vllm)
     args.top_p = 1 if args.temperature == 0 else args.top_p
     return args
@@ -56,21 +47,18 @@ def set_seed(seed: int = 42) -> None:
 
 
 def prepare_data(data_path, data_name, args):
-    
     examples = load_generated_data(data_path)
     # sample `num_test_sample` from dataset for debug purpose
     if args.num_test_sample > 0:
         examples = examples[: args.num_test_sample]
-
-
     examples = examples[args.start : len(examples) if args.end == -1 else args.end]
+
+    # Get output file name
     model_name = args.model_name_or_path.split('/')[-1]
-    # get out_file name
     out_file_prefix = f"{args.split}_{model_name}_seed{args.seed}_t{args.temperature}_len{args.max_tokens_per_call}"
     output_dir = args.output_dir
     if not os.path.exists(output_dir):
         output_dir = f"outputs/{output_dir}"
-    
     generated_dataset_file = f"{output_dir}/{data_name}/predictions/{out_file_prefix}_num{args.num_test_sample}s{args.start}e{args.end}_dataset_predictions.jsonl"
     os.makedirs(f"{output_dir}/{data_name}", exist_ok=True)
     os.makedirs(f"{output_dir}/{data_name}/predictions", exist_ok=True)
@@ -78,9 +66,7 @@ def prepare_data(data_path, data_name, args):
 
 
 def setup(args):
-
-    
-    # load model
+    # Load model
     available_gpus = os.environ["CUDA_VISIBLE_DEVICES"].split(",")
     llm = LLM(
         model=args.model_name_or_path,
@@ -88,109 +74,76 @@ def setup(args):
         pipeline_parallel_size=args.pipeline_parallel_size,
         trust_remote_code=True,
         max_num_seqs=args.max_num_seqs,
-        enable_prefix_caching=args.enable_prefix_caching,
-        enable_chunked_prefill=not args.disable_chunked_prefill,
         max_model_len=args.max_model_len,
         seed=args.seed,
     )
     tokenizer = llm.get_tokenizer()
 
-    # infer & eval
+    # Infer & eval
     data_paths = args.dataset_dir.split(",")
     data_list = args.data_names.split(",")
-
-
     assert len(data_list) == len(data_paths)
 
-    results = []
     for i, data_name in enumerate(data_list):
         main(llm, tokenizer, data_name, data_paths[i], args)
 
 
-    
 def main(llm, tokenizer, data_name, data_path, args):
+    examples, generated_dataset_file = prepare_data(data_path, data_name, args)
 
+    print("=" * 50)
+    print("data:", data_name, " , #samples:", len(examples))
+    if len(examples) > 0:
+        print(examples[0])
 
-        examples, generated_dataset_file = prepare_data(data_path, data_name, args)
-        print("Data prepration done!")
-        print("=" * 50)
-        print("data:", data_name, " , #samples:", len(examples))
-        if len(examples) > 0:
-            print(examples[0])
+    samples = []
+    for i, example in tqdm(enumerate(examples), total=len(examples)):
+        sample = {
+            "question": example["question"],
+            "gt": example['gt'],
+            "prompt": example['prompt'],
+            'first_reasonings': example['first_reasonings']
+        }
+        samples.append(sample)
 
-        samples = []
-        
-        for i, example in tqdm(enumerate(examples), total=len(examples)):
-            
+    prompts = []
+    for i, sample in enumerate(samples):
+        for j in range(len(sample['first_reasonings'])):
+            for _ in range(args.n_sampling):
+                prompts.append(sample['prompt'] + sample['first_reasonings'][j] + "\n</think>\n\n")
 
+    # Start inference
+    sampling_params = SamplingParams(
+        temperature=args.temperature,
+        top_p=args.top_p,
+        min_p=args.min_p,
+        max_tokens=args.max_tokens_per_call,
+        min_tokens=2,
+        n=1,
+        skip_special_tokens=False,
+        seed=args.seed,
 
-            sample = {
-                "question": example["question"],
-                "gt": example['gt'],
-                "prompt": example['prompt'],
-                'first_reasonings': example['first_reasonings']
-            }
+    )
+    outputs = llm.generate(prompts, sampling_params)
+    outputs = sorted(outputs, key=lambda x: int(x.request_id))
+    generated_reasonings = [output.outputs[0].text for output in outputs]
+    assert len(generated_reasonings) == len(prompts)
 
-            samples.append(sample)
+    answers = []
+    start_idx = 0
+    for i, sample in enumerate(samples):
+        n_first_reasoning_sampling = len(sample['first_reasonings'])
+        sample_answers = generated_reasonings[start_idx : start_idx + (n_first_reasoning_sampling * args.n_sampling)]
+        assert len(sample_answers) == n_first_reasoning_sampling * args.n_sampling
+        answers.append([sample_answers[i * args.n_sampling:(i + 1) * args.n_sampling] for i in range(n_first_reasoning_sampling)])
+        start_idx = start_idx + (n_first_reasoning_sampling * args.n_sampling)
 
+    updated_samples = []
+    for i, sample in enumerate(samples):
+        sample.update({"answer": answers[i]})
+        updated_samples.append(sample)
 
-
-
-        prompts = []
-        for i, sample in enumerate(samples):
-            for j in range(len(sample['first_reasonings'])):
-                for _ in range(args.n_sampling):
-                    prompts.append(sample['prompt'] + sample['first_reasonings'][j] + "\n</think>\n\n")
-    
-
-        # start inference
-        start_time = time.time()
-        # Either load existing think answers or generate new ones
-        sampling_params = SamplingParams(
-            temperature=args.temperature,
-            top_p=args.top_p,
-            min_p=args.min_p,
-            max_tokens=args.max_tokens_per_call,
-            min_tokens=2,
-            n=1,
-            skip_special_tokens=False,
-            seed=args.seed,
-
-        )
-
-        outputs = llm.generate(prompts, sampling_params)
-        outputs = sorted(outputs, key=lambda x: int(x.request_id))
-        generated_reasonings = [output.outputs[0].text for output in outputs]
-
-        assert len(generated_reasonings) == len(prompts)
-
-
-        answers = []
-        start_idx = 0
-        for i, sample in enumerate(samples):
-            n_first_reasoning_sampling = len(sample['first_reasonings'])
-            tmp_answers = generated_reasonings[start_idx : start_idx + (n_first_reasoning_sampling * args.n_sampling)]
-            assert len(tmp_answers) == n_first_reasoning_sampling * args.n_sampling
-            answers.append([tmp_answers[i * args.n_sampling:(i + 1) * args.n_sampling] for i in range(n_first_reasoning_sampling)])
-            start_idx = start_idx + (n_first_reasoning_sampling * args.n_sampling)
-
-        updated_samples = []
-        
-        
-        
-        for i, sample in enumerate(samples):
-            sample.update({
-                "answer": answers[i],
-             })
-            updated_samples.append(sample)
-
-
-
-        try:
-            save_jsonl(updated_samples, generated_dataset_file)
-
-        except Exception as e:
-            print(f"Error saving generated reasoning: {e}")
+    save_jsonl(updated_samples, generated_dataset_file)
 
 
 if __name__ == "__main__":
