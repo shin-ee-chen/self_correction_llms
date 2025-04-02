@@ -139,7 +139,7 @@ def main(llm, tokenizer, data_name, args):
     )
     outputs = llm.generate(prompts, sampling_params)
     outputs = sorted(outputs, key=lambda x: int(x.request_id))
-    generated_reasonings = [output.outputs[0].text for output in outputs]
+    generated_reasonings = [output.outputs[0].text.rstrip() for output in outputs]
     stop_reasons = [output.outputs[0].stop_reason for output in outputs]
     assert len(generated_reasonings) == len(prompts)
 
