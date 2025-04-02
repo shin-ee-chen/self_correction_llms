@@ -8,7 +8,7 @@ from tqdm import tqdm
 import torch
 from vllm import LLM, SamplingParams
 
-from utils.data import load_data, construct_prompt, save_jsonl
+from utils.data import load_data, construct_prompt
 from utils.parser import parse_question, parse_ground_truth
 
 

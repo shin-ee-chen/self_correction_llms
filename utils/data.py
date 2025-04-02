@@ -77,7 +77,9 @@ def load_data(data_name, split, data_dir="./data"):
 
 def load_generated_data(data_file):
     assert os.path.exists(data_file)
-    examples = list(load_jsonl(data_file))
+    #examples = list(load_jsonl(data_file))
+    with open(data_file, 'r', encoding='utf-8') as file:
+        examples = json.load(file)
 
     # add 'idx' in the first column
     if "idx" not in examples[0]:
