@@ -90,11 +90,8 @@ def setup(args):
 
 def main(llm, tokenizer, data_name, data_path, args):
     examples, generated_dataset_file = prepare_data(data_path, data_name, args)
-
     print("=" * 50)
     print("data:", data_name, " , #samples:", len(examples))
-    if len(examples) > 0:
-        print(examples[0])
 
     samples = []
     for i, example in tqdm(enumerate(examples), total=len(examples)):
