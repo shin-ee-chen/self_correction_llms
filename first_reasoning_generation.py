@@ -171,7 +171,7 @@ def main(llm, tokenizer, data_name, args):
     stop_reasons = [output.outputs[0].stop_reason for output in outputs]
     assert len(generated_reasonings) == len(prompts)
 
-    print(stop_reasons)
+    #print(stop_reasons)
 
     updated_samples = []
     for i, sample in enumerate(samples):
