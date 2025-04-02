@@ -1,4 +1,5 @@
 import os
+import json
 import random
 import argparse
 import numpy as np
@@ -156,7 +157,9 @@ def main(llm, tokenizer, data_name, args):
         sample.update({"first_reasonings": selected_sample_generated_reasonings})
         updated_samples.append(sample)
 
-    save_jsonl(updated_samples, generated_dataset_file)
+    # Save
+    json.dump(updated_samples, open(generated_dataset_file,"w",), indent=42)
+    #save_jsonl(updated_samples, generated_dataset_file)
 
 
 if __name__ == "__main__":
