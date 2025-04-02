@@ -158,7 +158,8 @@ def main(llm, tokenizer, data_name, args):
         updated_samples.append(sample)
 
     # Save
-    json.dump(updated_samples, open(generated_dataset_file,"w",), indent=42)
+    print(f"Save to {generated_dataset_file}")
+    json.dump(updated_samples, open(generated_dataset_file, "w",), indent=2)
     #save_jsonl(updated_samples, generated_dataset_file)
 
 
