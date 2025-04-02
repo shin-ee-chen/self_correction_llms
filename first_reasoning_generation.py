@@ -141,25 +141,6 @@ def main(llm, tokenizer, data_name, args):
             "prompt": full_prompt,
         }
 
-        # add remain fields
-        for key in [
-            "level",
-            "type",
-            "unit",
-            "solution_type",
-            "choices",
-            "solution",
-            "ques_type",
-            "ans_type",
-            "answer_type",
-            "dataset",
-            "subfield",
-            "filed",
-            "theorem",
-            "answer",
-        ]:
-            if key in example:
-                sample[key] = example[key]
         samples.append(sample)
 
     # creating prompts
@@ -177,6 +158,7 @@ def main(llm, tokenizer, data_name, args):
         top_p=args.top_p,
         min_p=args.min_p,
         max_tokens=args.max_tokens_per_call,
+        min_tokens=2,
         n=1,
         skip_special_tokens=False,
         seed=args.seed,
@@ -186,13 +168,22 @@ def main(llm, tokenizer, data_name, args):
     outputs = llm.generate(prompts, sampling_params)
     outputs = sorted(outputs, key=lambda x: int(x.request_id))
     generated_reasonings = [output.outputs[0].text for output in outputs]
-
+    stop_reasons = [output.outputs[0].stop_reason for output in outputs]
     assert len(generated_reasonings) == len(prompts)
+
+    print(stop_reasons)
 
     updated_samples = []
     for i, sample in enumerate(samples):
+        sample_generated_reasoning = generated_reasonings[i * args.n_sampling : (i + 1) * args.n_sampling]
+        sample_stop_reasoning = stop_reasons[i * args.n_sampling : (i + 1) * args.n_sampling]
+        tmp_generated_reasoning = []
+        for j in range(len(sample_generated_reasoning)):
+            if sample_stop_reasoning[j] == stop_token[0]:
+                tmp_generated_reasoning.append(sample_generated_reasoning[j])
+
         sample.update({
-                "first_reasonings": generated_reasonings[i * args.n_sampling : (i + 1) * args.n_sampling],
+                "first_reasonings": tmp_generated_reasoning,
              })
         updated_samples.append(sample)
 

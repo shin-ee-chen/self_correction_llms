@@ -108,10 +108,10 @@ def main(data_name, data_path, args):
             
             scores = []
             preds = []
-            for j in range(n_first_reasoning_sampling):
+            for j in range(len(sample['first_reasonings'])):
                 first_reasoning_scores = []
                 first_reasoning_preds = []
-                for k in range(n_answers_sampling):
+                for k in range(len(sample['answer'][j])):
                     result = extract_pred_and_parse(sample['answer'][j][k], data_name)
                     performance = per_sample_verification(result, sample['gt'])
 

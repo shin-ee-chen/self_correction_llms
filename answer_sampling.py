@@ -18,10 +18,8 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--data_names", default="gsm8k,math", type=str)
     parser.add_argument("--dataset_dir", default="", type=str)
-    parser.add_argument("--data_dir", default="./data", type=str)
     parser.add_argument("--model_name_or_path", default="gpt-4", type=str)
     parser.add_argument("--output_dir", default="./output", type=str)
-    parser.add_argument("--prompt_type", default="tool-integrated", type=str)
     parser.add_argument("--split", default="test", type=str)
     parser.add_argument("--num_test_sample", default=-1, type=int)  # -1 for full data
     parser.add_argument("--seed", default=0, type=int)
@@ -105,8 +103,8 @@ def setup(args):
     assert len(data_list) == len(data_paths)
 
     results = []
-    for i, d in enumerate(data_list):
-        main(llm, tokenizer, d, data_paths[i], args)
+    for i, data_name in enumerate(data_list):
+        main(llm, tokenizer, data_name, data_paths[i], args)
 
 
     
@@ -136,20 +134,14 @@ def main(llm, tokenizer, data_name, data_path, args):
             samples.append(sample)
 
 
-        n_first_reasoning_sampling = len(samples[0]['first_reasonings'])
+
 
         prompts = []
         for i, sample in enumerate(samples):
-            for j in range(n_first_reasoning_sampling):
+            for j in range(len(sample['first_reasonings'])):
                 for _ in range(args.n_sampling):
-                    prompts.append(sample['prompt']+ sample['first_reasonings'][j])
-        # prompts = [sample["prompt"] for sample in samples for _ in range(args.n_sampling)]
-
-        assert len(prompts) == len(samples) * n_first_reasoning_sampling * args.n_sampling
-
-        for i, p in enumerate(prompts):
-            if "</think>" not in p:
-                prompts[i] = prompts[i] + "</think>"
+                    prompts.append(sample['prompt'] + sample['first_reasonings'][j] + "\n</think>\n\n")
+    
 
         # start inference
         start_time = time.time()
@@ -159,6 +151,7 @@ def main(llm, tokenizer, data_name, data_path, args):
             top_p=args.top_p,
             min_p=args.min_p,
             max_tokens=args.max_tokens_per_call,
+            min_tokens=2,
             n=1,
             skip_special_tokens=False,
             seed=args.seed,
@@ -171,12 +164,15 @@ def main(llm, tokenizer, data_name, data_path, args):
 
         assert len(generated_reasonings) == len(prompts)
 
-        ### shape: n_first_reasoning_sampling * args.n_sampling
+
         answers = []
+        start_idx = 0
         for i, sample in enumerate(samples):
-            tmp_answers = generated_reasonings[i * n_first_reasoning_sampling * args.n_sampling : (i + 1) * n_first_reasoning_sampling * args.n_sampling]
+            n_first_reasoning_sampling = len(sample['first_reasonings'])
+            tmp_answers = generated_reasonings[start_idx : start_idx + (n_first_reasoning_sampling * args.n_sampling)]
             assert len(tmp_answers) == n_first_reasoning_sampling * args.n_sampling
             answers.append([tmp_answers[i * args.n_sampling:(i + 1) * args.n_sampling] for i in range(n_first_reasoning_sampling)])
+            start_idx = start_idx + (n_first_reasoning_sampling * args.n_sampling)
 
         updated_samples = []
         
