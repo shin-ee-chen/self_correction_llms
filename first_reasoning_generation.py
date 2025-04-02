@@ -123,7 +123,6 @@ def main(llm, tokenizer, data_name, args):
         }
         samples.append(sample)
 
-
     # Start generation
     stop_token = ["Alternatively,"]
     prompts = [sample["prompt"] for sample in samples for _ in range(args.n_sampling)]
@@ -143,6 +142,8 @@ def main(llm, tokenizer, data_name, args):
     generated_reasonings = [output.outputs[0].text for output in outputs]
     stop_reasons = [output.outputs[0].stop_reason for output in outputs]
     assert len(generated_reasonings) == len(prompts)
+
+    print(stop_reasons)
 
     # Prepare output
     updated_samples = []
