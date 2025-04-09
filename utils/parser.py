@@ -47,6 +47,16 @@ def extract_pred_and_parse(completion, data_name):
                 ),
             ]
         )
+    elif "**Answer:**" in completion:
+        pred = parse(
+            completion, 
+            extraction_config=[
+                LatexExtractionConfig(
+                    boxed_match_priority=0, 
+                    try_extract_without_anchor=True,
+                ),
+            ]
+        )
     else:
         pred = []
     return pred
