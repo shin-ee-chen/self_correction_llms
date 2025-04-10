@@ -76,42 +76,7 @@ def setup(args):
     results = []
     for i, d in enumerate(data_list):
         main(d, data_paths[i], args)
-
-def analysis(samples):
-    correct_r = defaultdict(list)
-    wrong_r = defaultdict(list)
-    
-    for sample in samples:
-        sample_idx = 0 
-        first_correct = {"f_acc": [], "n_tokens":[], "n_reasons":[]}
-        first_wrong = {"f_acc": [], "n_tokens":[], "n_reasons":[]}
-        
-        for i in range(len(sample["final_answer"])):
-            is_first_correct = True if True in sample["final_answer"][i][0] else False
-            type = first_correct if is_first_correct else first_wrong
-            
-            type["n_reasons"].append(len(sample["final_answer"][i]))
-            type["f_acc"].append(1 if True in sample["final_answer"][i][-1] else 0)
-            
-               
-            for j, reasoning in enumerate(sample["reasonings"]):
-                if sample["sample_idx"][j] == sample_idx:
-                   if j+1 >= len(sample["sample_idx"]) or \
-                        sample["sample_idx"][j+1] != sample_idx:
-                            type["n_tokens"].append(len(reasoning.split()))
-                            sample_idx += 1
-                            break
-            
-        for k, correct_v in first_correct.items():
-            wrong_v = first_wrong[k]
-            correct_r[k].append(np.nanmean(correct_v))
-            wrong_r[k].append(np.nanmean(wrong_v))
-        
-    for k, correct_v in correct_r.items():
-        print("Metric", "First Correct", "First Wrong")
-        wrong_v = wrong_r[k]
-        print(k, np.round(np.nanmean(correct_v), 2), np.round(np.nanmean(wrong_v), 2))
-                
+     
         
 def main(data_name, data_path, args):
         examples, generated_dataset_file = prepare_data(data_path, data_name, args)
@@ -175,7 +140,7 @@ def main(data_name, data_path, args):
 
             updated_samples.append(sample)
         
-        analysis(samples)
+        # analysis(samples)
         try:
             save_jsonl(samples, generated_dataset_file)
         except Exception as e:
