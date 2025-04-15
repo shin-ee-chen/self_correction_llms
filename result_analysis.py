@@ -1,13 +1,16 @@
 from collections import defaultdict
 import argparse
-from utils.data import load_generated_data, save_jsonl, load_jsonl
 import os
 import random
+import re
+
+import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from transformers import AutoTokenizer
 from sentence_transformers import SentenceTransformer, util
-import re
+
+from utils.data import load_generated_data, save_jsonl, load_jsonl
 
 def split_text_per_reason(text):
     # pattern = r'\b(wait|alternatively|however)\b'
@@ -27,6 +30,38 @@ def split_text_per_token(text):
         reasoning_chunks.append(" ".join(chunk))
     
     return reasoning_chunks
+
+
+
+def plot_similarity_vs_position(similarities, save_path=None):
+    """
+    Plot similarity scores versus reasoning position (index-based).
+
+    Args:
+        similarities (list of float): Similarity scores where index = reasoning position.
+        save_path (str, optional): Path to save the plot (e.g., 'plot.pdf'). If None, displays the plot.
+    """
+    positions = list(range(len(similarities)))
+
+    plt.figure(figsize=(7, 4))
+    plt.plot(positions, similarities, marker='o', linestyle='-', color='#0072B2', linewidth=2)
+    
+    plt.xlabel('Reasoning Position in Think Context', fontsize=12)
+    plt.ylabel('Similarity Score', fontsize=12)
+    
+    if len(positions) < 15:
+        plt.xticks(positions)
+    else:
+        plt.xlim(0, len(positions))
+        plt.xticks(range(0, len(positions) + 1, 5))  # show ticks every 5 positions
+    plt.grid(True, linestyle='--', alpha=0.6)
+    plt.tight_layout()
+
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+    else:
+        plt.show()
+
     
 
 def set_seed(seed: int = 42) -> None:
@@ -39,22 +74,21 @@ def set_seed(seed: int = 42) -> None:
     torch.backends.cudnn.deterministic = True
     print(f"Random seed set as {seed}")
 
-def get_reasoning_answer_similarity(reasonings, answers, embed_model):
+def get_reasoning_answer_similarity(reasonings, answers, embed_model, output_dir, split_type="reason"):
     sep_reasonings = []
     answers_sep = []
     sep_idx = []
     answer_embedding = embed_model.encode(answers)
 
     for i in range(len(reasonings)):
-        # reasoning = split_text_per_reason(reasonings[i])
-        reasoning = split_text_per_token(reasonings[i])
+        reasoning = split_text_per_reason(reasonings[i]) if split_type == "reason" else split_text_per_token(reasonings[i])
         for j, r in enumerate(reasoning):
             sep_reasonings.append(r)
             answers_sep.append(answer_embedding[i])
             sep_idx.append(i)
     
     reasonings_embedding = embed_model.encode(sep_reasonings)
-    # answers_embedding = embed_model.encode(sep_answers)
+   
     
     similarity_scores = defaultdict(list)
     for i, r_emb in enumerate(reasonings_embedding):
@@ -70,10 +104,16 @@ def get_reasoning_answer_similarity(reasonings, answers, embed_model):
     mean_length = int(np.round(np.mean(lengths), 0).item())
     median_length = int(np.median(lengths).item())
     
-    inte_lens = [longest_length, mean_length, median_length]
-   
-    for inte_len in inte_lens:
-        print("inte_len:", inte_len)
+    inte_lens = {"longest_length":longest_length, 
+                 "mean_length": mean_length, 
+                 "median_length": median_length}
+    
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+        
+    for len_type, inte_len in inte_lens.items():
+        similarities = []
+        # print("inte_len:", inte_len)
         pos_sim = defaultdict(list)
         for _, v in similarity_scores.items():
             reasonings_score = [s.item() for s in v]
@@ -82,12 +122,15 @@ def get_reasoning_answer_similarity(reasonings, answers, embed_model):
                 pos_sim[i].append(sim)
 
         for k, v in pos_sim.items():
-            print(np.round(np.mean(v), 2), end = " ")
-            if highest_score < np.round(np.mean(v), 2):
-                highest_score = np.round(np.mean(v), 2)
-                idx = k
+            # print(np.round(np.mean(v), 2), end = " ")
+            similarities.append(np.round(np.mean(v), 2))
+            # if highest_score < np.round(np.mean(v), 2):
+            #     highest_score = np.round(np.mean(v), 2)
+            #     idx = k
     
-        print("highest", idx, highest_score)
+        # print("highest", idx, highest_score)
+        plot_similarity_vs_position(similarities, 
+                                    save_path=os.path.join(output_dir, f"{split_type}_{len_type}.pdf"))
     
 
 
@@ -106,7 +149,6 @@ def analysis(samples, args):
     embed_model = SentenceTransformer('all-MiniLM-L6-v2')
     
     reasoning_similarity = defaultdict(list)
-    reasoning_p_values = defaultdict(list)
     
     reasonings = []
     answer_think_sum = []
@@ -157,14 +199,16 @@ def analysis(samples, args):
     for k, v in reasoning_similarity.items():
         print(k, np.round(np.mean(v), 2), end="\t")
     
-    
-    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model)
+    print("Split with reason")
+    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model, args.output_dir, split_type="reason")
+    print("Split with token")
+    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model, args.output_dir, split_type="token")
     
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_dir", default="/projects/0/gusr0608/outputs/output/math/judge/test_DeepSeek-R1-Distill-Qwen-7B_seed0_num-1s0e-1_dataset_judge_answer.jsonl", type=str)
     parser.add_argument("--model_name_or_path", default="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", type=str)
-    parser.add_argument("--output_dir", default="./output", type=str)
+    parser.add_argument("--output_dir", default="/projects/0/gusr0608/self_correction_llms/similarity_plots", type=str)
     parser.add_argument("--split", default="test", type=str)
     parser.add_argument("--num_test_sample", default=-1, type=int)  # -1 for full data
     parser.add_argument("--seed", default=0, type=int)
