@@ -222,7 +222,6 @@ def avg_attention_between(attn: torch.Tensor, src: Tuple[int, int], tgt: Tuple[i
     sub_matrix = attn[tgt_start:tgt_end, src_start:src_end]  # shape: (tgt_len, src_len)
     return sub_matrix.mean().item() if sub_matrix.numel() > 0 else 0.0
 
-
 import torch
 from typing import Union
 from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -250,6 +249,7 @@ def analyze_attention_to_segments(
         current_pos += len(tokens_r)
     
     tokens_t_e, _ = tokenize_and_get_span("\n</think>\n", tokenizer)
+    span_t_e = (current_pos, current_pos + len(tokens_t_e))
     current_pos += len(tokens_t_e)
     # Tokenize answer
     token_a, _ = tokenize_and_get_span(answer, tokenizer)
@@ -275,45 +275,76 @@ def analyze_attention_to_segments(
     attn = outputs.attentions[0]  # shape: (batch_size, num_heads, seq_len, seq_len)
     
     for n_head in range(attn[0].size()[0]):
-        attn_avg = attn[0][n_head]
-        q_score = avg_attention_between(attn_avg, src=span_q, tgt=span_a)
-        reasoning_score = [avg_attention_between(attn_avg, src=s, tgt=span_a) for s in spans_rs]
-        q_scores.append(q_score)
-        reasoning_scores.append(reasoning_score)
+        positions = [span_q[0], span_q[1]]
+        splits = ['p_b', 'p_e']
+        for i, spans_r in enumerate(spans_rs):
+            positions.extend([spans_r[0], spans_r[1]])
+            splits.extend([f'r{i}_b', f"r{i}_e"])
         
-    return {
-        "attention_to_question": q_scores,
-        "attention_to_reasonings": reasoning_scores,
-    }
+        positions.extend([span_t_e[0], span_t_e[1]])
+        splits.extend(['t_e_b', 't_e_e'])
+
+        positions.extend([span_a[0], span_a[1]])
+        splits.extend(['a_b', 'a_e'])
+
+        plot_attention_map(attn[0], n_head, positions, splits)
+
+        # attn_avg = attn[0][n_head]
+        # q_score = avg_attention_between(attn_avg, src=span_q, tgt=span_a)
+        # reasoning_score = [avg_attention_between(attn_avg, src=s, tgt=span_a) for s in spans_rs]
+        # q_scores.append(q_score)
+        # reasoning_scores.append(reasoning_score)
+        
+    # return {
+    #     "attention_to_question": q_scores,
+    #     "attention_to_reasonings": reasoning_scores,
+    # }
   
 
-def interpolate_similarity_scores(reasoning_answer_scores):
-    lengths = list(map(len, list(reasoning_answer_scores.values())))
-    longest_length = max(lengths)
-    mean_length = int(np.round(np.mean(lengths), 0).item())
-    median_length = int(np.median(lengths).item())
+# def interpolate_similarity_scores(reasoning_answer_scores):
+#     lengths = list(map(len, list(reasoning_answer_scores.values())))
+#     longest_length = max(lengths)
+#     mean_length = int(np.round(np.mean(lengths), 0).item())
+#     median_length = int(np.median(lengths).item())
     
-    inte_lens = {"longest_length":longest_length, 
-                 "mean_length": mean_length, 
-                 "median_length": median_length}
+#     inte_lens = {"longest_length":longest_length, 
+#                  "mean_length": mean_length, 
+#                  "median_length": median_length}
     
-    for len_type, inte_len in inte_lens.items():
-        similarities = []
-        # print("inte_len:", inte_len)
-        pos_sim = defaultdict(list)
-        for _, v in reasoning_answer_scores.items():
-            reasonings_score = [s for s in v]
-            inte_v = interpolate_list(reasonings_score, inte_len)
-            for i, sim in enumerate(inte_v):
-                pos_sim[i].append(sim)
+#     for len_type, inte_len in inte_lens.items():
+#         similarities = []
+#         # print("inte_len:", inte_len)
+#         pos_sim = defaultdict(list)
+#         for _, v in reasoning_answer_scores.items():
+#             reasonings_score = [s for s in v]
+#             inte_v = interpolate_list(reasonings_score, inte_len)
+#             for i, sim in enumerate(inte_v):
+#                 pos_sim[i].append(sim)
 
-        for k, v in pos_sim.items():
-            # print(np.round(np.mean(v), 2), end = " ")
-            similarities.append(np.round(np.mean(v), 4))
-            # if highest_score < np.round(np.mean(v), 2):
-            #     highest_score = np.round(np.mean(v), 2)
-            #     idx = k
-        print(len_type, similarities)
+#         for k, v in pos_sim.items():
+#             # print(np.round(np.mean(v), 2), end = " ")
+#             similarities.append(np.round(np.mean(v), 4))
+#             # if highest_score < np.round(np.mean(v), 2):
+#             #     highest_score = np.round(np.mean(v), 2)
+#             #     idx = k
+#         print(len_type, similarities)
+
+def plot_attention_map(layer_attention, head, positions, split):
+    attention = layer_attention[head].cpu().numpy()
+    
+    # Plot the attention map
+    plt.figure(figsize=(8, 6))
+    plt.imshow(attention, cmap='hot', interpolation='nearest')
+    plt.colorbar()
+    tick_positions = positions  # Positions of tokens to label
+    tick_labels = split  # Corresponding labels
+    plt.title(f'Attention Head {head}')
+    plt.xlabel('Input Sequence')
+    plt.ylabel('Input Sequence')
+    # Set custom ticks
+    plt.xticks(tick_positions, tick_labels, rotation=90)
+    plt.yticks(tick_positions, tick_labels)
+    plt.savefig(f'attention_heatmap_{head}.png', dpi=300, bbox_inches='tight')
 
 
 def attention_analysis(samples, args):
@@ -324,7 +355,7 @@ def attention_analysis(samples, args):
                                                  ).eval()
    
     
-    question_answer_scores_layer = defaultdict(list)
+    # question_answer_scores_layer = defaultdict(list)
     reasoning_answer_scores_layer = defaultdict(lambda: defaultdict(list))
     count = 0
     for sample in tqdm(samples):
@@ -337,18 +368,19 @@ def attention_analysis(samples, args):
                 answer = sample['answer'][i][0]
                 split_reasoning = split_text_per_reason(reasoning)
                 results = analyze_attention_to_segments(question, split_reasoning, answer, tokenizer, model)
-                for n_head in range(len(results["attention_to_question"])):
-                    question_answer_scores_layer[n_head].append(results["attention_to_question"][n_head])
-                    reasoning_answer_scores_layer[n_head][count] = results["attention_to_reasonings"][n_head]
+                # for n_head in range(len(results["attention_to_question"])):
+                    # # question_answer_scores_layer[n_head].append(results["attention_to_question"][n_head])
+                    # reasoning_answer_scores_layer[n_head][count] = results["attention_to_reasonings"][n_head]
+
                 count += 1
-        #         if count > 0:
-        #             break
-        # break
+                if count > 0:
+                    break
+        break
     
-    for n_head, question_answer_scores in question_answer_scores_layer.items(): 
-        print("n_head", n_head)   
-        print("question attention score", np.mean(question_answer_scores))
-        interpolate_similarity_scores(reasoning_answer_scores_layer[n_head])
+    # for n_head, question_answer_scores in question_answer_scores_layer.items(): 
+    #     print("n_head", n_head)   
+    #     print("question attention score", np.mean(question_answer_scores))
+    #     interpolate_similarity_scores(reasoning_answer_scores_layer[n_head])
     
                 
 
