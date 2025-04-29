@@ -7,17 +7,16 @@ import numpy as np
 from tqdm import tqdm
 import torch
 from utils.data import load_generated_data, save_jsonl
-from utils.parser import deserialize_list_of_lists, extract_pred_and_parse
+from utils.parser import extract_pred_and_parse
 from utils.eval import per_sample_verification
-
-from collections import defaultdict
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_names", default="math", type=str)
-    parser.add_argument("--dataset_dir", default="/projects/0/gusr0608/self_correction_llms/outputs/math500/predictions/test_DeepSeek-R1-Distill-Qwen-7B_seed0_t0_len2048_num-1s0e-1_dataset_predictions.json", type=str)
+    parser.add_argument("--data_names", default="aime24", type=str)
+    parser.add_argument("--dataset_dir", default="/projects/0/gusr0608/self_correction_llms/outputs/modified_first_reasoning/wrong/aime24/predictions/test_DeepSeek-R1-Distill-Qwen-7B_seed0_t0_len16384_num-1s0e-1_True_dataset_predictions.json", type=str)
     parser.add_argument("--model_name_or_path", default="deepseek-ai/DeepSeek-R1-Distill-Qwen-7B", type=str)
-    parser.add_argument("--output_dir", default="./output", type=str)
+    parser.add_argument("--output_dir", default="/projects/0/gusr0608/self_correction_llms/modified_first_reasoning", type=str)
     parser.add_argument("--split", default="test", type=str)
     parser.add_argument("--num_test_sample", default=-1, type=int)  # -1 for full data
     parser.add_argument("--seed", default=0, type=int)
@@ -83,6 +82,7 @@ def main(data_name, data_path, args):
         print("Data prepration done!")
         print("=" * 50)
         print("data:", data_name, " , #samples:", len(examples))
+        tokenizer =  AutoTokenizer.from_pretrained(args.model_name_or_path)
 
         samples = []
         for i, example in tqdm(enumerate(examples), total=len(examples)):
@@ -97,11 +97,9 @@ def main(data_name, data_path, args):
             samples.append(sample)
 
 
-        n_reasoning_sampling = len(samples[0]['reasonings'])
-        n_answers_sampling = len(samples[0]['answer'][0])
-
         updated_samples = []
-        
+        accs = []
+        n_tokens = []
         for i, sample in enumerate(samples):
             scores = []
             preds = []
@@ -120,18 +118,21 @@ def main(data_name, data_path, args):
                         sampling_scores = []
                         sampling_preds = []
                         sample_idx = sample["sample_idx"][j]
+                    answer = sample['answer'][j][k].split("</think>")[-1]
                     
-                    result = extract_pred_and_parse(sample['answer'][j][k], data_name)
+                    result = extract_pred_and_parse(answer, data_name)
                     performance = per_sample_verification(result, sample['gt'])
                     result = [str(r) for r in result] 
                     # reasoning_preds.append(result)
                     # reasoning_scores.append(performance)
-                    
+                    n_tokens.append(len(tokenizer(sample['answer'][j][k]).input_ids))
+                    accs.append(1 if True in performance else 0)
                     sampling_scores.append(result)
                     sampling_preds.append(performance)
                 
             scores.append(sampling_scores)
             preds.append(sampling_preds)
+            
 
             sample.update({
                 "score": scores,
@@ -141,6 +142,8 @@ def main(data_name, data_path, args):
             updated_samples.append(sample)
         
         # analysis(samples)
+        print(np.mean(accs))
+        print(np.mean(n_tokens))
         try:
             save_jsonl(samples, generated_dataset_file)
         except Exception as e:
