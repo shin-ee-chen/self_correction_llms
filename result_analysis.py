@@ -159,19 +159,28 @@ def analysis(samples, args):
     answer_think_sum = []
     for sample in samples:
         sample_idx = 0 
-        first_correct = {"f_acc": [], "r_acc":[], "n_tokens":[], "n_reasons":[], "count": 0}
-        first_wrong = {"f_acc": [], "r_acc":[], "n_tokens":[], "n_reasons":[], "count": 0}
+        first_correct = {"f_acc": [], "n_tokens":[], "n_reasons":[], "count": 0}
+        first_wrong = {"f_acc": [], "n_tokens":[], "n_reasons":[], "count": 0}
         
         for i in range(len(sample["final_answer"])):
+            is_all_wrong = True
+            for ans in sample["final_answer"][i]:
+                if True in ans:
+                    is_all_wrong = False
+                    break
+            
+            if is_all_wrong:
+                break
+            
             is_first_correct = True if True in sample["final_answer"][i][0] else False
             type = first_correct if is_first_correct else first_wrong
             type["count"] += 1
-            type["n_reasons"].append(len(sample["final_answer"][i]))
+            # type["n_reasons"].append(len(sample["final_answer"][i]))
+           
             type["f_acc"].append(1 if True in sample["final_answer"][i][-1] else 0)
             r_acc = []
             for j, ans in enumerate(sample["final_answer"][i][1:]):
                 r_acc.append(1 if True in ans else 0)
-            type["r_acc"].append(np.mean(r_acc))
             
             begin_idx = -1
             for j, reasoning in enumerate(sample["reasonings"]):
@@ -179,13 +188,17 @@ def analysis(samples, args):
                    begin_idx = j if begin_idx < 0 else begin_idx
                    if j+1 >= len(sample["sample_idx"]) or \
                         sample["sample_idx"][j+1] != sample_idx:
+                            n_reasons = split_text_per_reason(reasoning)
+                            type["n_reasons"].append(len(n_reasons))
                             tokens = tokenizer(reasoning).input_ids
                             type["n_tokens"].append(len(tokens))
                             reasonings.append(reasoning)
                             answer_think_sum.append(sample["answer"][j][0])
                             sample_idx += 1
                             break
-            
+        
+        if is_all_wrong:
+            continue   
         for k, correct_v in first_correct.items():
             wrong_v = first_wrong[k]
             if isinstance(correct_v, list):
@@ -205,9 +218,13 @@ def analysis(samples, args):
         print(k, np.round(np.mean(v), 2), end="\t")
     
     print("Split with reason")
-    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model, args.output_dir, split_type="reason")
+    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model, 
+                                    args.output_dir + args.model_name_or_path.split("/")[-1], 
+                                    split_type="reason")
     print("Split with token")
-    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model, args.output_dir, split_type="token")
+    get_reasoning_answer_similarity(reasonings, answer_think_sum, embed_model, 
+                                    args.output_dir + args.model_name_or_path.split("/")[-1], 
+                                    split_type="token")
 
 
 
@@ -389,7 +406,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--dataset_dir", default="/projects/0/gusr0608/self_correction_llms/outputs/aime24_outputs/test_DeepSeek-R1-Distill-Qwen-7B_seed0_num-1s0e-1_dataset_judge_answer.jsonl", type=str)
     parser.add_argument("--model_name_or_path", default="deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B", type=str)
-    parser.add_argument("--output_dir", default="/projects/0/gusr0608/self_correction_llms/similarity_plots", type=str)
+    parser.add_argument("--output_dir", default="/home/nmd254/self_correction_llms/outputs/aime24_outputs/similarity_plots", type=str)
     parser.add_argument("--split", default="test", type=str)
     parser.add_argument("--num_test_sample", default=-1, type=int)  # -1 for full data
     parser.add_argument("--seed", default=0, type=int)
@@ -408,5 +425,5 @@ if __name__ == "__main__":
 
     set_seed(args.seed)
     examples = list(load_jsonl(args.dataset_dir))
-    # analysis(examples, args)
-    attention_analysis(examples, args)
+    analysis(examples, args)
+    # attention_analysis(examples, args)
